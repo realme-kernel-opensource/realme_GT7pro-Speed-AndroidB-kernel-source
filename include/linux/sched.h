@@ -73,6 +73,10 @@ struct task_delay_info;
 struct task_group;
 struct user_event_mm;
 
+#ifdef CONFIG_HMBIRD_SCHED
+#include <linux/sched/hmbird.h>
+#endif
+
 /*
  * Task state bitmask. NOTE! These bits are also
  * encoded in fs/proc/array.c: get_task_state().
@@ -1681,8 +1685,9 @@ static inline unsigned int __task_state_index(unsigned int tsk_state,
 	 * We're lying here, but rather than expose a completely new task state
 	 * to userspace, we can make this appear as if the task has gone through
 	 * a regular rt_mutex_lock() call.
+	 * Report frozen tasks as uninterruptible.
 	 */
-	if (tsk_state & TASK_RTLOCK_WAIT)
+	if ((tsk_state & TASK_RTLOCK_WAIT) || (tsk_state & TASK_FROZEN))
 		state = TASK_UNINTERRUPTIBLE;
 
 	return fls(state);
@@ -1742,7 +1747,7 @@ extern struct pid *cad_pid;
 #define PF_USED_MATH		0x00002000	/* If unset the fpu must be initialized before use */
 #define PF_USER_WORKER		0x00004000	/* Kernel thread cloned from userspace thread */
 #define PF_NOFREEZE		0x00008000	/* This thread should not be frozen */
-#define PF__HOLE__00010000	0x00010000
+#define PF_KCOMPACTD		0x00010000	/* I am kcompactd */
 #define PF_KSWAPD		0x00020000	/* I am kswapd */
 #define PF_MEMALLOC_NOFS	0x00040000	/* All allocation requests will inherit GFP_NOFS */
 #define PF_MEMALLOC_NOIO	0x00080000	/* All allocation requests will inherit GFP_NOIO */
@@ -1919,6 +1924,92 @@ static inline int task_nice(const struct task_struct *p)
 {
 	return PRIO_TO_NICE((p)->static_prio);
 }
+
+#ifdef CONFIG_HMBIRD_SCHED
+static inline bool task_is_top_task(struct task_struct *p)
+{
+	return (((struct hmbird_entity *)(p->android_oem_data1[HMBIRD_TS_IDX]))
+		->top_task_prop & TOP_TASK_BITS_MASK);
+}
+
+static inline int get_top_task_prop(struct task_struct *p)
+{
+	return get_hmbird_ts(p)->top_task_prop;
+}
+
+static inline int set_top_task_prop(struct task_struct *p, u64 set, u64 clear)
+{
+	if (set)
+		get_hmbird_ts(p)->top_task_prop |= set;
+	if (clear)
+		get_hmbird_ts(p)->top_task_prop &= ~clear;
+	return 0;
+}
+
+static inline void reset_top_task_prop(struct task_struct *p)
+{
+	get_hmbird_ts(p)->top_task_prop = 0;
+}
+
+static inline int hmbird_set_sched_prop(struct task_struct *p, unsigned long sp)
+{
+	struct hmbird_entity *entity = get_hmbird_ts(p);
+
+	if (entity) {
+		entity->sched_prop = sp;
+	}
+	return 0;
+}
+
+static inline unsigned long hmbird_get_sched_prop(struct task_struct *p)
+{
+	struct hmbird_entity *entity = get_hmbird_ts(p);
+
+	if (entity)
+		return entity->sched_prop;
+	else
+		return 0;
+}
+
+static inline void hmbird_set_dsq_id(struct task_struct *p, unsigned long dsq)
+{
+	unsigned long new_dsq;
+	struct hmbird_entity *entity = get_hmbird_ts(p);
+
+	if (entity) {
+		new_dsq = (entity->sched_prop & ~SCHED_PROP_DEADLINE_MASK) | dsq;
+		entity->sched_prop = new_dsq;
+	}
+}
+
+static inline unsigned long hmbird_get_dsq_id(struct task_struct *p)
+{
+	struct hmbird_entity *entity = get_hmbird_ts(p);
+
+	if (entity)
+		return (entity->sched_prop & SCHED_PROP_DEADLINE_MASK);
+	else
+		return 0;
+}
+
+static inline void hmbird_set_dsq_sync_ux(struct task_struct *p, int val)
+{
+	struct hmbird_entity *entity = get_hmbird_ts(p);
+
+	if (entity)
+		entity->dsq_sync_ux = val;
+}
+
+static inline int hmbird_get_dsq_sync_ux(struct task_struct *p)
+{
+	struct hmbird_entity *entity = get_hmbird_ts(p);
+
+	if (entity)
+		return entity->dsq_sync_ux;
+	else
+		return 0;
+}
+#endif
 
 extern int can_nice(const struct task_struct *p, const int nice);
 extern int task_curr(const struct task_struct *p);
